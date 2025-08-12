@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>生活英语 — 即时查词本（MVP）</title>
+  <style>
+    :root{
+      --bg:#fbfbfc;
+      --card:#fff;
+      --muted:#666;
+      --accent:#0b84ff;
+      --radius:12px;
+      font-family: "PingFang SC","Helvetica Neue",Arial, sans-serif;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:linear-gradient(180deg,#f6f8fb,var(--bg));
+      color:#111;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+      padding:20px;
+    }
+    header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      margin-bottom:18px;
+    }
+    h1{font-size:20px;margin:0}
+    .container{max-width:720px;margin:0 auto}
+    .card{
+      background:var(--card);
+      border-radius:var(--radius);
+      box-shadow:0 6px 18px rgba(20,30,50,0.06);
+      padding:16px;
+    }
+    .search{
+      display:flex;
+      gap:8px;
+      margin-bottom:12px;
+    }
+    .search input{
+      flex:1;
+      padding:12px 14px;
+      border-radius:10px;
+      border:1px solid #e6e9ee;
+      font-size:16px;
+    }
+    .btn{
+      background:var(--accent);
+      color:white;
+      border:none;
+      padding:10px 14px;
+      border-radius:10px;
+      cursor:pointer;
+      font-weight:600;
+    }
+    .btn.secondary{
+      background:transparent;
+      color:var(--accent);
+      border:1px solid #d7e7ff;
+    }
+    .result{
+      margin-top:14px;
+      text-align:center;
+      padding:12px;
+    }
+    .chinese{font-size:20px;margin:6px 0;font-weight:700}
+    .english{font-size:28px;margin:6px 0;color:var(--accent);font-weight:700}
+    .example{color:var(--muted);margin-top:8px}
+    .actions{display:flex;gap:8px;justify-content:center;margin-top:12px}
+    .wordlist{margin-top:16px}
+    .word-item{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:10px;border-radius:10px;border:1px solid #f0f2f5;margin-bottom:8px;
+    }
+    .meta{font-size:12px;color:#888}
+    .small{font-size:13px;color:var(--muted)}
+    footer{margin-top:20px;text-align:center;color:#999;font-size:13px}
+    .tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    @media (max-width:420px){
+      .english{font-size:22px}
+      .chinese{font-size:18px}
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>生活英语 — 即时单词本（MVP）</h1>
+      <div class="small">MVP · 本地存储</div>
+    </header>
+
+    <div class="card">
+      <div class="search">
+        <input id="chInput" placeholder="输入中文（例如：杨树 / 桌子 / 苹果）" />
+        <button id="lookupBtn" class="btn">查询</button>
+      </div>
+
+      <div class="small">也可允许使用“获取位置”来记录你在哪里学到的单词（可选）</div>
+
+      <div id="result" class="result" style="display:none;">
+        <div class="chinese" id="resChinese"></div>
+        <div class="english" id="resEnglish"></div>
+        <div class="meta" id="resPron"></div>
+        <div class="example" id="resExample"></div>
+
+        <div class="actions">
+          <button id="speakBtn" class="btn secondary">🔊 发音</button>
+          <button id="saveBtn" class="btn">💾 保存到单词本</button>
+          <button id="locBtn" class="btn secondary">📍 获取位置</button>
+        </div>
+      </div>
+
+      <div class="tools">
+        <button id="showListBtn" class="btn secondary">查看单词本</button>
+        <button id="exportBtn" class="btn">导出 CSV</button>
+        <button id="clearAllBtn" class="btn secondary">清空单词本</button>
+      </div>
+
+      <div id="wordlist" class="wordlist" style="display:none"></div>
+    </div>
+
+    <footer>提示：这是 MVP 版。想要「拍照识物」「划词取词」我可以在下一步帮你接入。</footer>
+  </div>
+
+<script>
+/*
+  MVP 功能说明（代码内注释有说明）：
+  - translateChinese(text): 使用 MyMemory 免费 API 进行 zh→en 翻译
+  - 如果 API 失败会使用 localFallback 字典（可扩展）
+  - 保存项：{ch, en, example, createdAt, lat, lng}
+  - 存储在 localStorage 键 'life_words_v1'
+  - 导出为 CSV
+  - 发音使用 SpeechSynthesis（如果浏览器支持）
+*/
+
+// ---------- 简单本地回退词库（可扩充） ----------
+const localFallback = {
+  "杨树": {en:"poplar tree", example:"There are several poplar trees in the park."},
+  "桌子": {en:"table", example:"Put the book on the table."},
+  "苹果": {en:"apple", example:"I ate an apple this morning."},
+  "狗": {en:"dog", example:"The dog is sleeping under the tree."},
+  "椅子": {en:"chair", example:"Please take a seat on the chair."}
+};
+
+// ---------- DOM ----------
+const chInput = document.getElementById('chInput');
+const lookupBtn = document.getElementById('lookupBtn');
+const result = document.getElementById('result');
+const resChinese = document.getElementById('resChinese');
+const resEnglish = document.getElementById('resEnglish');
+const resPron = document.getElementById('resPron');
+const resExample = document.getElementById('resExample');
+const speakBtn = document.getElementById('speakBtn');
+const saveBtn = document.getElementById('saveBtn');
+const locBtn = document.getElementById('locBtn');
+const showListBtn = document.getElementById('showListBtn');
+const wordlist = document.getElementById('wordlist');
+const exportBtn = document.getElementById('exportBtn');
+const clearAllBtn = document.getElementById('clearAllBtn');
+
+let lastResult = null; // 保存最近查询结果（用于保存动作）
+let lastLocation = null; // {lat,lng}
+
+// ---------- Storage helpers ----------
+const STORAGE_KEY = 'life_words_v1';
+function loadWords(){ 
+  try{
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+  }catch(e){ return [];}
+}
+function saveWords(arr){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
+}
+
+// ---------- 翻译函数（使用 MyMemory 免费 API） ----------
+async function translateChinese(text){
+  if(!text || !text.trim()) throw new Error('empty');
+  // First try MyMemory API
+  const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=zh|en';
+  try{
+    const resp = await fetch(url);
+    if(!resp.ok) throw new Error('network');
+    const data = await resp.json();
+    // MyMemory may return translatedText in response.responseData.translatedText
+    const trans = data?.responseData?.translatedText || '';
+    // sometimes it returns capitalized or sentence-case; keep it simple
+    const example = data?.matches?.[0]?.segment ? `${data.matches[0].translation || ''}` : '';
+    return {
+      en: trans || localFallback[text]?.en || '',
+      example: example || (localFallback[text]?.example || (`I see a ${trans || localFallback[text]?.en || text}.`))
+    };
+  }catch(err){
+    // Fallback to local dictionary
+    if(localFallback[text]){
+      return { en: localFallback[text].en, example: localFallback[text].example};
+    }
+    // If not found, try a simple rule (word-by-word) using a tiny internal map (very limited)
+    const simpleMap = {
+      "树":"tree","花":"flower","车":"car","房子":"house","猫":"cat","手机":"phone","水":"water"
+    };
+    const words = text.replace(/[^\u4e00-\u9fa5]/g,'').split('');
+    for(let w of words){
+      if(simpleMap[w]){
+        return { en: simpleMap[w], example: `This is a ${simpleMap[w]}.` };
+      }
+    }
+    // 最后：返回原文拼音式占位（可让用户保存并稍后编辑）
+    return { en: text, example: `（未找到精确翻译，请稍后编辑）` };
+  }
+}
+
+// ---------- UI 操作 ----------
+async function doLookup(){
+  const text = chInput.value.trim();
+  if(!text){ alert('请输入中文词汇'); return; }
+  resChinese.textContent = text;
+  resEnglish.textContent = '查询中...';
+  resPron.textContent = '';
+  resExample.textContent = '';
+  result.style.display = 'block';
+
+  try{
+    const data = await translateChinese(text);
+    resEnglish.textContent = data.en || '(未找到)';
+    resPron.textContent = data.en ? `英语：${data.en}` : '';
+    resExample.textContent = data.example || '';
+    lastResult = { ch:text, en:data.en, example:data.example };
+  }catch(e){
+    resEnglish.textContent = '(查询失败)';
+    resExample.textContent = '';
+    lastResult = null;
+  }
+}
+
+async function trySpeak(text){
+  if(!('speechSynthesis' in window)){
+    alert('你的浏览器不支持 SpeechSynthesis（语音合成）。');
+    return;
+  }
+  const utter = new SpeechSynthesisUtterance(text);
+  // 尝试设置为英语
+  utter.lang = 'en-US';
+  // 如果浏览器有可选 voice，尽量挑选一个英语 voice
+  const voices = speechSynthesis.getVoices();
+  const enVoice = voices.find(v => v.lang.startsWith('en')) || voices[0];
+  if(enVoice) utter.voice = enVoice;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(utter);
+}
+
+function renderList(){
+  const arr = loadWords();
+  if(arr.length === 0){
+    wordlist.innerHTML = '<div class="small" style="padding:12px;color:#888">单词本为空。查词后点击“保存到单词本”会出现在这里。</div>';
+  }else{
+    wordlist.innerHTML = '';
+    arr.slice().reverse().forEach((item, idx) => {
+      const el = document.createElement('div');
+      el.className = 'word-item';
+      const left = document.createElement('div');
+      left.innerHTML = `<div style="font-weight:700">${item.ch} → ${item.en}</div>
+                        <div class="small">${item.example || ''}</div>
+                        <div class="meta">${new Date(item.createdAt).toLocaleString()}${item.lat? ' · '+item.lat.toFixed(4)+','+item.lng.toFixed(4):''}</div>`;
+      const right = document.createElement('div');
+      right.style.display='flex';
+      right.style.flexDirection='column';
+      right.style.gap='6px';
+      const editBtn = document.createElement('button'); editBtn.className='btn secondary'; editBtn.textContent='编辑';
+      const delBtn = document.createElement('button'); delBtn.className='btn'; delBtn.textContent='删除';
+      editBtn.onclick = ()=> editItem(arr.length - 1 - (arr.slice().reverse().indexOf(item)));
+      delBtn.onclick = ()=> deleteItem(arr.length - 1 - (arr.slice().reverse().indexOf(item)));
+      right.appendChild(editBtn);
+      right.appendChild(delBtn);
+      el.appendChild(left);
+      el.appendChild(right);
+      wordlist.appendChild(el);
+    });
+  }
+  wordlist.style.display = 'block';
+}
+
+function saveCurrent(){
+  if(!lastResult){
+    alert('先查询一个词再保存。');
+    return;
+  }
+  const arr = loadWords();
+  const item = {
+    ch: lastResult.ch,
+    en: lastResult.en,
+    example: lastResult.example,
+    createdAt: Date.now(),
+    lat: lastLocation?.lat || null,
+    lng: lastLocation?.lng || null
+  };
+  arr.push(item);
+  saveWords(arr);
+  alert('已保存到单词本');
+  renderList();
+}
+
+function deleteItem(index){
+  const arr = loadWords();
+  if(index <0 || index >= arr.length) return;
+  if(!confirm('确认删除该词？')) return;
+  arr.splice(index,1);
+  saveWords(arr);
+  renderList();
+}
+
+function editItem(index){
+  const arr = loadWords();
+  if(index <0 || index >= arr.length) return;
+  const cur = arr[index];
+  const newEn = prompt('编辑英文（en）', cur.en);
+  if(newEn !== null){
+    cur.en = newEn;
+    const newEx = prompt('编辑例句（example）', cur.example || '');
+    if(newEx !== null) cur.example = newEx;
+    saveWords(arr);
+    renderList();
+  }
+}
+
+function exportCSV(){
+  const arr = loadWords();
+  if(arr.length === 0){ alert('单词本为空'); return; }
+  const rows = [['中文','英文','例句','时间','lat','lng']];
+  arr.forEach(it => rows.push([it.ch, it.en, it.example || '', new Date(it.createdAt).toLocaleString(), it.lat || '', it.lng || '']));
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'life_words_export.csv'; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },5000);
+}
+
+// ---------- Location ----------
+function getLocationOnce(){
+  if(!navigator.geolocation){
+    alert('浏览器不支持地理位置');
+    return;
+  }
+  locBtn.textContent = '📍 获取中...';
+  navigator.geolocation.getCurrentPosition(pos=>{
+    lastLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    locBtn.textContent = '📍 已获取位置';
+    setTimeout(()=>locBtn.textContent='📍 获取位置',1500);
+  }, err=>{
+    console.warn(err);
+    alert('获取位置失败：' + err.message);
+    locBtn.textContent = '📍 获取位置';
+  }, {enableHighAccuracy:false, timeout:10000});
+}
+
+// ---------- Events ----------
+lookupBtn.addEventListener('click', doLookup);
+chInput.addEventListener('keydown', (e)=>{ if(e.key === 'Enter') doLookup(); });
+speakBtn.addEventListener('click', ()=> { if(lastResult) trySpeak(lastResult.en); else alert('先查一个词再发音'); });
+saveBtn.addEventListener('click', saveCurrent);
+locBtn.addEventListener('click', getLocationOnce);
+showListBtn.addEventListener('click', renderList);
+exportBtn.addEventListener('click', exportCSV);
+clearAllBtn.addEventListener('click', ()=>{
+  if(!confirm('确认清空本地单词本？此操作不可恢复。')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  renderList();
+});
+
+// 初始渲染
+renderList();
+
+// ---------- 额外说明（开发者友好） ----------
+/*
+  - 如果你想接入更强的词典（例如有权威释义、词性、音标），
+    把 translateChinese 函数里对 MyMemory 的调用替换成你选的 API（LibreTranslate / Youdao / Google Cloud Translation）。
+    注意：很多商用 API 需要 API Key，并且需在后端代理以避免泄露密钥。
+  - 拍照识物：可以在未来加一个 input type=file accept="image/*"，上传图片给后端或使用前端 TF 模型（例如 mobilenet）做识别，然后把识别结果当作中文或英文去查询。
+  - 想要把这个网页打包成原生 APP（iOS/Android），可以使用 Capacitor 或 Cordova 把网页打包；或者用 Tauri / Electron 做桌面版。
+*/
+</script>
+</body>
+</html>
